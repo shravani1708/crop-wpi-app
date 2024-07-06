@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import '../styles/CropPredictionForm.css'; // Import the CSS file
 
 const CropPredictionForm = () => {
     const [city, setCity] = useState('');
@@ -28,7 +29,7 @@ const CropPredictionForm = () => {
     };
 
     return (
-        <div>
+        <div className="form-container">
             <h2>Crop Yield Prediction</h2>
             <form onSubmit={handleSubmit}>
                 <label>
@@ -57,7 +58,7 @@ const CropPredictionForm = () => {
                 </label>
                 <button type="submit">Predict</button>
             </form>
-            {prediction && <p>Prediction: {prediction}</p>}
+            {prediction && <p className="prediction">Prediction: {prediction}</p>}
         </div>
     );
 };

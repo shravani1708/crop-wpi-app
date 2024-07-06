@@ -1,0 +1,31 @@
+.home-container {
+    text-align: center;
+    font-family: Arial, sans-serif;
+    padding: 20px;
+    background-image: url('../assets/corn.svg'); /* Replace with your SVG path */
+    background-size: 40%; /* Make the background image 50% smaller */
+    background-position: center;
+    background-repeat: no-repeat; /* Prevent the background from repeating */
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.content {
+    background-color: rgba(255, 255, 255, 0.7); /* Semi-transparent white background for content */
+    padding: 20px;
+    border-radius: 10px;
+    max-width: 800px;
+    margin: auto;
+}
+
+h1 {
+    color: #4CAF50;
+    margin-bottom: 10px;
+}
+
+p {
+    font-size: 1.2em;
+    color: #333;
+}

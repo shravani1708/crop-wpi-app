@@ -3,11 +3,11 @@ import pickle
 import requests
 import pandas as pd
 from flask_cors import CORS
-from statsmodels.tsa.arima.model import ARIMA
-from sklearn.metrics import mean_squared_error
+from pmdarima import auto_arima
 import numpy as np
 import warnings
-import itertools
+from datetime import datetime
+from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -17,7 +17,7 @@ CORS(app)
 with open('models/RandomForest.pkl', 'rb') as model_file:
     model = pickle.load(model_file)
 
-# Ignore warnings for ARIMA model
+# Ignore warnings for SARIMA model
 warnings.filterwarnings("ignore")
 
 # Load WPI dataset
@@ -37,6 +37,7 @@ def predict():
     ph = float(data['ph'])
     rainfall = float(data['rainfall'])
 
+    # Fetch weather data from API
     weather_api_key = '6daa8091ea0a64e28c136f2a3a55a3b9'
     weather_url = f'http://api.openweathermap.org/data/2.5/weather?q={city}&appid={weather_api_key}&units=metric'
     response = requests.get(weather_url)
@@ -44,6 +45,7 @@ def predict():
     temperature = weather_data['main']['temp']
     humidity = weather_data['main']['humidity']
 
+    # Prepare input data for crop prediction
     data_df = pd.DataFrame({
         'N': [npk_values[0]],
         'P': [npk_values[1]],
@@ -54,6 +56,7 @@ def predict():
         'rainfall': [rainfall]
     })
 
+    # Use RandomForest model for prediction
     prediction = model.predict(data_df)[0]
     return jsonify({'prediction': prediction})
 
@@ -67,37 +70,79 @@ def wpi_forecast():
     if df_commodity.empty:
         return jsonify({'error': 'Commodity not found in dataset'})
 
-    train_size = int(len(df_commodity) * 0.8)
-    train, test = df_commodity.iloc[:train_size], df_commodity.iloc[train_size:]
+    # Fit SARIMA model using auto_arima for automated model selection
+    model = SARIMAX(df_commodity['WPI'], order=(0, 1, 2), seasonal_order=(0, 1, 0, 12))
+    model_fit = model.fit(disp=False)
 
-    p = d = q = range(0, 3)
-    pdq = list(itertools.product(p, d, q))
-
-    best_rmse = float('inf')
-    best_params = None
-    for param in pdq:
-        try:
-            model = ARIMA(train['WPI'], order=param)
-            model_fit = model.fit()
-            forecast_test = model_fit.forecast(steps=len(test))
-            rmse = np.sqrt(mean_squared_error(test['WPI'], forecast_test))
-            if rmse < best_rmse:
-                best_rmse = rmse
-                best_params = param
-        except:
-            continue
-
-    model = ARIMA(df_commodity['WPI'], order=best_params)
-    model_fit = model.fit()
+    # Forecast for one year starting from the current system date
+    today = datetime.now().date()
     forecast_steps = 12
-    forecast_next_year = model_fit.forecast(steps=forecast_steps)
+    forecast_dates = pd.date_range(start=today, periods=forecast_steps + 1, freq='M')[1:]
 
-    last_date = df_commodity.index[-1]
-    forecast_dates = pd.date_range(last_date, periods=forecast_steps + 1, freq='M')[1:]
+    # Generate forecasts and confidence intervals
+    forecast_next_year = model_fit.get_forecast(steps=forecast_steps)
+    forecast_mean = forecast_next_year.predicted_mean
+    conf_int = forecast_next_year.conf_int()
 
-    forecast_df = pd.DataFrame({'Date': forecast_dates, 'Forecasted WPI': forecast_next_year})
+    forecast_df = pd.DataFrame({
+        'Date': forecast_dates,
+        'Forecasted WPI': forecast_mean,
+        'Lower CI': conf_int.iloc[:, 0],
+        'Upper CI': conf_int.iloc[:, 1]
+    })
 
     return jsonify({'forecast': forecast_df.to_dict(orient='records')})
+
+@app.route('/weather', methods=['POST'])
+def get_weather():
+    data = request.get_json()
+    city = data.get('city')
+    
+    api_key = '6daa8091ea0a64e28c136f2a3a55a3b9'
+    base_url = 'http://api.openweathermap.org/data/2.5/weather'
+
+    # Construct URL without date parameter to get current weather
+    url = f'{base_url}?q={city}&appid={api_key}&units=metric'
+    
+    # Fetch weather data from the API
+    response = requests.get(url)
+    data = response.json()
+
+    if 'main' in data and 'temp_max' in data['main'] and 'temp_min' in data['main']:
+        max_temp = data['main']['temp_max'] - 273.15
+        min_temp = data['main']['temp_min'] - 273.15
+
+        # Get other weather information
+        humidity = data['main']['humidity']
+        wind_speed = data['wind']['speed']
+
+        # Check if sunrise and sunset timestamps exist in the response
+        if 'sys' in data and 'sunrise' in data['sys'] and 'sunset' in data['sys']:
+            sunrise_timestamp = data['sys']['sunrise']
+            sunset_timestamp = data['sys']['sunset']
+            
+            # Convert sunrise and sunset times to readable format
+            sunrise_time = datetime.fromtimestamp(sunrise_timestamp).strftime('%Y-%m-%d %H:%M:%S')
+            sunset_time = datetime.fromtimestamp(sunset_timestamp).strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            sunrise_time = "Unknown"
+            sunset_time = "Unknown"
+
+        # Create formatted weather report
+        report = {
+            'city': city,
+            'date': 'today',
+            'maxTemp': max_temp,
+            'minTemp': min_temp,
+            'humidity': humidity,
+            'windSpeed': wind_speed,
+            'sunriseTime': sunrise_time,
+            'sunsetTime': sunset_time
+        }
+
+        return jsonify(report)
+    else:
+        return jsonify({'error': 'Weather data not available for the given city.'})
 
 if __name__ == '__main__':
     app.run(debug=True)
